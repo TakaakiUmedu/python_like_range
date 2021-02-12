@@ -1,7 +1,7 @@
 #include <tuple>
 #include <functional>
 
-namespace enumerable{
+namespace iterable{
 	using namespace std;
 
 	template<typename T = int> class range{
@@ -23,136 +23,115 @@ namespace enumerable{
 		inline T end() const{ return _e; }
 	};
 	
-	void hoge(){
-		int a = 10;
-		auto x = (tuple<int&>)make_tuple(ref(a));
-	}
+	class auto_t{ private: auto_t(); };
 	
-	template<typename E> using iter_b = decltype(declval<E>().begin());
-	template<typename E> using iter_e = decltype(declval<E>().end());
-	
-	class default_type{ private: default_type(); };
-	
-	template<typename C, typename... R> class tuple_type_builder;
-	template<typename C> class tuple_type_builder<C>{
-	public:
-		using type = tuple<default_type>;
-	};
-	template<typename C, typename... R> class tuple_type_builder{
-	public:
-		using type = decltype(tuple_cat(declval<tuple<default_type>>(), declval<typename tuple_type_builder<R...>::type>()));
-	};
-	template<typename... Cs> using tuple_type_from_containers = typename tuple_type_builder<Cs...>::type;
-	
-	template<typename V, typename I> static inline auto make_tuple_from_iter(I i){
-		using T = decltype(*declval<I>());
+	namespace{
+		template<typename E> using iter_b = decltype(declval<E>().begin());
+		template<typename E> using iter_e = decltype(declval<E>().end());
 		
-		static_assert(!(!is_same<V, default_type>::value && is_reference<V>::value && is_lvalue_reference<T>::value && !is_const<V>::value && is_const<T>::value), "cannot make non const reference to const lvalue"); // error 1
-		static_assert(!(!is_same<V, default_type>::value && is_reference<V>::value && !is_lvalue_reference<T>::value), "cannot make non reference for rvalue");
-		
-		if constexpr(is_same<V, default_type>::value){
-			using P = typename remove_const<typename remove_reference<T>::type>::type;
-			if constexpr(!is_lvalue_reference<T>::value || is_fundamental<P>::value){
-				return (tuple<P>)make_tuple(*i);
-			}else{
-				return (tuple<const P&>)make_tuple(cref(*i));
-			}
-		}else{
-			if constexpr(is_reference<V>::value){
-				if constexpr(is_lvalue_reference<T>::value){
-					if constexpr(is_const<V>::value){
-						return (tuple<V>)make_tuple(cref(*i));
-					}else{
-						if constexpr(!is_const<T>::value){
-							return (tuple<V>)make_tuple(ref(*i));
-						}else{
-							// error 1
-						}
-					}
+		template<typename P, typename I> static inline auto make_tuple_from_iter(I i){
+			using A                  = decltype(*declval<I>());
+			using A_non_ref          = typename remove_reference<A>::type;
+			using A_naked            = typename remove_const<A_non_ref>::type;
+			const bool A_const       = is_const<A_non_ref>::value;
+			const bool A_ref         = is_lvalue_reference<A>::value;
+			const bool A_fundamental = is_fundamental<A_naked>::value;
+			
+			using P_non_ref          = typename remove_reference<P>::type;
+			using P_naked_tmp        = typename remove_const<P_non_ref>::type;
+			const bool P_auto        = is_same<P_naked_tmp, auto_t>::value;
+			const bool P_const_tmp   = is_const<P_non_ref>::value;
+			const bool P_ref_tmp     = is_lvalue_reference<P>::value;
+			const bool P_pure_auto   = P_auto && !P_const_tmp && !P_ref_tmp;
+			
+			using P_naked            = conditional_t<P_auto, A_naked, P_naked_tmp>;
+			const bool P_const       = (P_const_tmp || (P_pure_auto && !A_fundamental && A_ref));
+			const bool P_ref         = (P_ref_tmp   || (P_pure_auto && !A_fundamental && A_ref));
+			
+			static_assert(!(P_ref && !P_const && A_const), "cannot make non const reference to const lvalue");
+			static_assert(!(P_ref && !A_ref), "cannot make reference for rvalue");
+			
+			if constexpr(P_ref){
+				if constexpr(P_const){
+					return (tuple<const P_naked&>)make_tuple(cref(*i));
 				}else{
-					// error 2
+					return (tuple<P_naked&>)make_tuple(ref(*i));
 				}
 			}else{
-				return (tuple<V>)make_tuple(*i);
+				if constexpr(P_const){
+					return (tuple<const P_naked>)make_tuple(*i);
+				}else{
+					return (tuple<P_naked>)make_tuple(*i);
+				}
 			}
 		}
-	}
-	template<typename I1, typename I2> inline auto make_tuple_from_iters(I1& i1, I2& i2){
-		return tuple_cat(make_tuple_from_iter(i1), make_tuple_from_iter(i2));
-	}
-	
-	template<typename V, typename C, typename R = void> class zip_container;
-	template<typename V, typename I, typename R = void> class zip_iter;
-	
-	template<typename V, typename I> class zip_iter<V, I>{
-	public:
-		I _i;
-	public:
-		zip_iter(I i): _i(i){}
-		inline const auto operator*() const{ return make_tuple_from_iter<V, I>(_i); }
-		inline void operator++(){ ++_i; }
-		inline void operator++(int){ operator++(); }
-		template<typename E> auto operator!=(const E& end) const{ return _i != end._i; }
-	};
-	
-	template<typename V, typename I, typename R> class zip_iter: public zip_iter<V, I>{
-	public:
-		R _rest;
-	public:
-		zip_iter(I i, R rest): zip_iter<V, I>(i), _rest(rest){}
-		inline const auto operator*() const{ return tuple_cat(make_tuple_from_iter<V, I>(this->_i), *_rest); }
-		inline void operator++(){ zip_iter<V,I>::operator++(); ++_rest; }
-		inline void operator++(int){ operator++(); }
-		template<typename E> auto operator!=(const E& end) const{ return zip_iter<V, I>::operator!=(end) && _rest != end._rest; }
-	};
-	
-	template<typename V, typename C> class zip_container<V, C>{
-	public:
-		C container;
-	public:
-		zip_container(C&& c): container(forward<C>(c)){}
-		inline auto begin() { return zip_iter<V, decltype(container.begin())>(container.begin()); }
-		inline auto end() { return zip_iter<V, decltype(container.end())>(container.end()); }
-	};
-	
-	template<typename V, typename C, typename R> class zip_container: public zip_container<V, C>{
-	public:
-		R _rest;
-	public:
-		zip_container(C&& c, R rest): zip_container<V, C>(forward<C>(c)), _rest(rest){ }
-		inline auto begin() { return zip_iter<V, decltype(this->container.begin()), decltype(_rest.begin())>(this->container.begin(), _rest.begin()); }
-		inline auto end() { return zip_iter<V, decltype(this->container.end()), decltype(_rest.end())>(this->container.end(), _rest.end()); }
-	};
-	
-	template<typename T, int index, typename C, typename... Cs> auto make_zip_container(C&& c, Cs&&... cs){
-		using container_type = conditional_t<is_lvalue_reference<C>::value, C&, C>;
-		if constexpr(sizeof...(Cs) == 0){
-			return zip_container<typename tuple_element<index, T>::type, container_type>(forward<C>(c));
-		}else{
-			return zip_container<typename tuple_element<index, T>::type, container_type, decltype(make_zip_container<T, index + 1, Cs...>(forward<Cs>(cs)...))>(forward<C>(c), make_zip_container<T, index + 1, Cs...>(forward<Cs>(cs)...));
-		}
-	}
-	
-	template<typename T = tuple<default_type>, typename... Cs> auto zip(Cs&&... cs){
-		using tuple_type = conditional_t<
-			is_same<T, tuple<default_type>>::value,
-			tuple_type_from_containers<Cs...>,
-			T
-		>;
+		template<typename... T> inline void dummy(T... x){} // I don't know how to avoid use dummy()
 		
-		static_assert(tuple_size<tuple_type>::value == sizeof...(Cs), "number of tuple template parameter and arguments are not matched");
-		return make_zip_container<tuple_type, 0, Cs...>(forward<Cs>(cs)...);
+		template<typename TV, typename TI> class zip_iter{
+			TI _i;
+			template<typename TE, size_t N> inline bool comp(TE&& e){
+				if constexpr(N < tuple_size_v<TI>){
+					return get<N>(_i) != get<N>(e) && comp<TE, N + 1>(forward<TE>(e));
+				}else{
+					return true;
+				}
+			}
+			template<size_t N> inline auto make_tuple(){
+				auto tuple = make_tuple_from_iter<typename tuple_element<N, TV>::type>(get<N>(_i));
+				if constexpr(N < tuple_size_v<TI> - 1){
+					return tuple_cat(tuple, make_tuple<N + 1>());
+				}else{
+					return tuple;
+				}
+			}
+		public:
+			zip_iter(TI&& i): _i(i){}
+			inline auto operator*(){ return make_tuple<0>(); }
+			inline void operator++(){ apply([](auto&... i){ dummy(++i...); }, _i); } // I don't know how to remove dummy() call
+			inline void operator++(int){ operator++(); }
+			
+			template<typename TE> inline bool operator!=(TE&& e){
+				return comp<TE, 0>(forward<TE>(e));
+			}
+		
+			operator TI(){ return *this; };
+		};
+		
+		template<typename T, typename... Is> auto make_zip_iter(Is&&... is){
+			return zip_iter<T, Is...>(forward<Is>(is)...);
+		}
+		
+		template<typename TV, typename TC> class zip_container{
+			TC _t;
+		public:
+			zip_container(TC&& t): _t(forward<TC>(t)){}
+			auto begin(){ return apply([](auto&... c){ return make_zip_iter<TV>(make_tuple(c.begin()...)); }, _t); }
+			auto end(){ return apply([](auto&... c){ return make_tuple(c.end()...); }, _t); }
+			operator TC(){ return *this; };
+		};
+		
+		template<size_t N, typename T, typename... Ts> class tuple_type_builder{              public: using type = typename tuple_type_builder<N - 1, T, T, Ts...>::type; };
+		template<          typename T, typename... Ts> class tuple_type_builder<0, T, Ts...>{ public: using type = tuple<Ts...>; };
+		
+		template<typename T, typename... Cs> using make_tuple_type_from_arguments = conditional_t<
+			is_same<typename remove_const<typename remove_reference<T>::type>::type, auto_t>::value,
+			typename tuple_type_builder<sizeof...(Cs), T>::type,
+			T
+		>;	
+	}
+	template<typename T = auto_t, typename... Cs> auto zip(Cs&&... cs){
+		using tuple_type = make_tuple_type_from_arguments<T, Cs...>;
+		
+		static_assert(tuple_size<tuple_type>::value == sizeof...(Cs), "the numbers of tuple elements of parameter and arguments are not matched");
+		return zip_container<tuple_type, tuple<Cs...>>(forward_as_tuple<Cs...>(forward<Cs>(cs)...));
 	}
 
-	template<typename T = tuple<default_type>, typename... Cs> auto enumerate(Cs&&... cs){
-		using tuple_type = conditional_t<
-			is_same<T, tuple<default_type>>::value,
-			tuple_type_from_containers<int, Cs...>,
-			decltype(tuple_cat(make_tuple<int>(0), (T)declval<T>()))
-		>;
+	template<typename T = auto_t, typename... Cs> auto enumerate(Cs&&... cs){
+		using tuple_type = decltype(tuple_cat(make_tuple<int>(0), declval<make_tuple_type_from_arguments<T, Cs...>>()));
+		
 		return zip<tuple_type>(range(numeric_limits<int>::max()), forward<Cs>(cs)...);
 	}
-	
+
 /*
 	enum { EE, EP, PE, PP };
 	
@@ -223,11 +202,13 @@ namespace enumerable{
 //	template<typename ...Rs> inline auto mdrange(int n, Rs... rest){ return range(n) * mdrange(forward<Rs>(rest)...); }
 //	template<typename ...Rs> inline auto mdrange(const range&& r, Rs... rest){ return r * mdrange(forward<Rs>(rest)...); }
 }
-
-using enumerable::range;
-using enumerable::zip;
-using enumerable::enumerate;
-//using enumerable::product;
-//using enumerable::operator*;
-//using enumerable::mdrange;
+/*
+using iterable::range;
+using iterable::zip;
+using iterable::enumerate;
+using iterable::auto_t;
+*/
+//using iterable::product;
+//using iterable::operator*;
+//using iterable::mdrange;
 
