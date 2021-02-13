@@ -89,7 +89,7 @@ namespace iterable{
 			I _i;
 		public:
 			zip_iter(I i): _i(i){}
-			inline const auto operator*() const{ return make_tuple_from_iter<V, I>(_i); }
+			inline auto operator*() const{ return make_tuple_from_iter<V, I>(_i); }
 			inline void operator++(){ ++_i; }
 			inline void operator++(int){ operator++(); }
 			template<typename E> auto operator!=(const E& end) const{ return _i != end._i; }
@@ -100,7 +100,7 @@ namespace iterable{
 			R _rest;
 		public:
 			zip_iter(I i, R rest): zip_iter<V, I>(i), _rest(rest){}
-			inline const auto operator*() const{ return tuple_cat(make_tuple_from_iter<V, I>(this->_i), *_rest); }
+			inline auto operator*() const{ return tuple_cat(make_tuple_from_iter<V, I>(this->_i), *_rest); }
 			inline void operator++(){ zip_iter<V,I>::operator++(); ++_rest; }
 			inline void operator++(int){ operator++(); }
 			template<typename E> auto operator!=(const E& end) const{ return zip_iter<V, I>::operator!=(end) && _rest != end._rest; }
@@ -147,7 +147,7 @@ namespace iterable{
 		using tuple_type = make_tuple_type_from_arguments<T, Cs...>;
 		
 		static_assert(tuple_size<tuple_type>::value == sizeof...(Cs), "the numbers of tuple elements of parameter and arguments are not matched");
-		return zip_container<tuple_type, Cs...>(forward<Cs>(cs)...);
+		return make_zip_container<tuple_type, 0, Cs...>(forward<Cs>(cs)...);
 	}
 
 	template<typename T = auto_t, typename... Cs> auto enumerate(Cs&&... cs){
